@@ -30,7 +30,8 @@ const modalUpdated = document.querySelector('[data-modal-updated]');
 function toggleRepoModal()
 {
   if (modalContainer.style.display === 'none' || !modalContainer.style.display) {
-    modalContainer.style.display = 'block';
+    // 使用 flex 以启用居中布局（CSS 中 .modal-container 已定义 display:flex）
+    modalContainer.style.display = 'flex';
     requestAnimationFrame(() => modalContainer.classList.add('active'));
     overlay.classList.add('active');
   } else {
@@ -48,31 +49,60 @@ async function fetchRepos()
   if (!repoList) return;
 
   const workerEndpoint = 'https://github-proxy.kms12425-ctrl.workers.dev/api/repos';
+  const publicFallback = 'https://api.github.com/users/kms12425-ctrl/repos?per_page=12&sort=updated';
 
-  // 1) 优先访问 Worker
+  // 0) 先尝试读取 localStorage 的上次缓存，提升首屏（异步更新）
   try {
-    const resp = await fetch(workerEndpoint, { cache: 'no-store' });
-    if (!resp.ok) throw new Error('Worker failed: ' + resp.status);
-    const payload = await resp.json();
-    if (payload && Array.isArray(payload.repos)) {
-      renderRepos(payload.repos);
-      // 可选：显示同步时间
-      const lastEl = document.getElementById('repo-last-update');
-      if (lastEl && payload.generated_at) {
-        lastEl.textContent = 'Synced: ' + new Date(payload.generated_at).toLocaleString();
+    const cached = localStorage.getItem('repos-cache-v1');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && Array.isArray(parsed.repos)) {
+        renderRepos(parsed.repos);
+        const lastEl = document.getElementById('repo-last-update');
+        if (lastEl && parsed.generated_at) {
+          lastEl.textContent = 'Cached: ' + new Date(parsed.generated_at).toLocaleString();
+        }
       }
-      return;
     }
-    throw new Error('Unexpected worker JSON shape');
-  } catch (e) {
-    console.warn('[Worker fallback]', e);
-  }
+  } catch (_) { }
+
+  // 包装 fetch 增加超时
+  const fetchWithTimeout = (url, ms = 4500) =>
+  {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), ms);
+    return fetch(url, { cache: 'no-store', signal: controller.signal })
+      .finally(() => clearTimeout(t));
+  };
+
+  // 1) 优先访问 Worker（带超时）
+  // try {
+  //   const resp = await fetchWithTimeout(workerEndpoint, 4500);
+  //   if (!resp.ok) throw new Error('Worker failed: ' + resp.status);
+  //   const payload = await resp.json();
+  //   if (payload && Array.isArray(payload.repos)) {
+  //     // 若之前已经渲染缓存列表，这里可以进行差异更新（简单直接重绘）
+  //     repoList.innerHTML = '';
+  //     renderRepos(payload.repos);
+  //     const lastEl = document.getElementById('repo-last-update');
+  //     if (lastEl && payload.generated_at) {
+  //       lastEl.textContent = 'Synced: ' + new Date(payload.generated_at).toLocaleString();
+  //     }
+  //     try { localStorage.setItem('repos-cache-v1', JSON.stringify(payload)); } catch (_) { }
+  //     return;
+  //   }
+  //   throw new Error('Unexpected worker JSON shape');
+  // } catch (e) {
+  //   console.warn('[Worker fallback]', e);
+  // }
 
   // 2) 回退直接 GitHub 公共 API（非授权，速率较低）
   try {
-    const resp = await fetch('https://api.github.com/users/kms12425-ctrl/repos?per_page=12&sort=updated');
+    const resp = await fetchWithTimeout(publicFallback, 5000);
     if (!resp.ok) throw new Error('GitHub API error ' + resp.status);
     const data = await resp.json();
+    // 与 worker 返回字段不完全一致，这里直接渲染
+    repoList.innerHTML = '';
     renderRepos(data);
   } catch (e2) {
     console.error('Fetch repos failed:', e2);

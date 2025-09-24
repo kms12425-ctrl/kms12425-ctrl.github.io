@@ -60,20 +60,49 @@ async function handleRepos(request: Request, env: Env, ctx: ExecutionContext): P
 	// 先查缓存
 	let cached = await cache.match(cacheKey);
 	if (cached) {
+		// 命中缓存立即返回，同时后台刷新（简易 stale-while-revalidate）
 		const h = new Headers(cached.headers);
 		h.set('CF-Cache', 'HIT');
+		ctx.waitUntil(refreshAndPut(cache, cacheKey, env));
 		return new Response(cached.body, { headers: h, status: cached.status });
 	}
 
-	const ghUrl = 'https://api.github.com/users/kms12425-ctrl/repos?per_page=50&sort=updated';
+	// 未命中：抓取并写入
+	const fresh = await fetchAndBuild(env);
+	ctx.waitUntil(cache.put(cacheKey, fresh.clone()));
+	return fresh;
+}
 
-	const ghResp = await fetch(ghUrl, {
-		headers: {
-			'Authorization': `Bearer ${env.GH_TOKEN}`,
-			'Accept': 'application/vnd.github+json',
-			'User-Agent': 'personal-site-worker'
-		}
-	});
+async function refreshAndPut(cache: Cache, cacheKey: Request, env: Env)
+{
+	try {
+		const fresh = await fetchAndBuild(env);
+		await cache.put(cacheKey, fresh.clone());
+	} catch { /* 静默失败 */ }
+}
+
+async function fetchAndBuild(env: Env): Promise<Response>
+{
+	const ghUrl = 'https://api.github.com/users/kms12425-ctrl/repos?per_page=30&sort=updated'; // 降低 per_page
+
+	// 超时控制（4 秒放弃，返回错误 JSON 由前端 fallback）
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 4000);
+	let ghResp: Response;
+	try {
+		ghResp = await fetch(ghUrl, {
+			headers: {
+				'Authorization': `Bearer ${env.GH_TOKEN}`,
+				'Accept': 'application/vnd.github+json',
+				'User-Agent': 'personal-site-worker'
+			},
+			signal: controller.signal
+		});
+	} catch (e: any) {
+		clearTimeout(timeout);
+		return json({ error: 'GitHub fetch failed', message: e?.message || String(e) }, { status: 504 });
+	}
+	clearTimeout(timeout);
 
 	if (!ghResp.ok) {
 		return json({ error: 'GitHub API error', status: ghResp.status }, { status: ghResp.status });
@@ -81,11 +110,10 @@ async function handleRepos(request: Request, env: Env, ctx: ExecutionContext): P
 
 	let list: any[] = await ghResp.json();
 
-	// 白名单 & 排序 & 过滤 & 限制数量
 	const repos = list
-		.filter(r => !r.fork) // 过滤 fork
+		.filter(r => !r.fork)
 		.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-		.slice(0, 20)
+		.slice(0, 16) // 减少传输量
 		.map(r => ({
 			name: r.name,
 			description: r.description,
@@ -107,12 +135,8 @@ async function handleRepos(request: Request, env: Env, ctx: ExecutionContext): P
 	const headers: HeadersInit = {
 		...corsHeaders(),
 		'Content-Type': 'application/json',
-		'Cache-Control': 'public, max-age=300', // 浏览器缓存 5 分钟
+		'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
 		'CF-Cache': 'MISS'
 	};
-
-	const response = new Response(body, { status: 200, headers });
-	// 异步写入边缘缓存
-	ctx.waitUntil(cache.put(cacheKey, response.clone()));
-	return response;
+	return new Response(body, { status: 200, headers });
 }
