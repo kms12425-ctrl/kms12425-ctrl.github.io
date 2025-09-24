@@ -674,6 +674,202 @@ main {
 
 /* (Removed GitHub contribution calendar wrapper styles) */
 
+/* ================= Repo Carousel (GitHub Repositories) ================= */
+.repo-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.repo-nav-btns {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.repo-nav-btn {
+  background: var(--onyx);
+  border: 1px solid var(--jet);
+  color: var(--white-2);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 1.05rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .25s, opacity .25s, transform .25s;
+}
+
+.repo-nav-btn:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.repo-nav-btn:not(:disabled):hover {
+  background: var(--eerie-black-2);
+  transform: translateY(-2px);
+}
+
+.repo-carousel {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 左右渐隐提示：通过父容器伪元素实现 */
+.repo-carousel::before,
+.repo-carousel::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 70px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity .35s ease;
+}
+
+.repo-carousel::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--smoky-black) 0%, rgba(23, 23, 23, 0) 100%);
+}
+
+.repo-carousel::after {
+  right: 0;
+  background: linear-gradient(-90deg, var(--smoky-black) 0%, rgba(23, 23, 23, 0) 100%);
+}
+
+.repo-carousel.has-prev::before {
+  opacity: .9;
+}
+
+.repo-carousel.has-next::after {
+  opacity: .9;
+}
+
+/* 更顺滑：当 JS 想要显式控制 transition 可给 track 添加类 */
+.repo-track.smooth-transition {
+  transition: transform .6s cubic-bezier(.22, .72, .25, 1) !important;
+}
+
+.repo-track {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: stretch;
+  transition: transform .55s cubic-bezier(.16, .8, .24, 1);
+  will-change: transform;
+}
+
+.repo-slide {
+  flex: 0 0 100%;
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
+}
+
+.repo-slide .content-card {
+  width: clamp(280px, 72%, 640px);
+}
+
+/* 邻近提示效果：非当前项缩小并淡出 */
+.repo-slide {
+  opacity: 0.25;
+  transform: scale(.82);
+  transition: opacity .45s, transform .45s;
+}
+
+.repo-slide.is-active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.repo-slide.is-prev,
+.repo-slide.is-next {
+  opacity: .55;
+  transform: scale(.9);
+}
+
+/* Loading 占位 */
+.loading-slide .content-card {
+  text-align: center;
+}
+
+.repo-last-update {
+  margin-top: 0.5rem;
+  font-size: .75rem;
+  opacity: .65;
+  letter-spacing: .5px;
+}
+
+/* 进度指示圆点 */
+.repo-dots {
+  display: flex;
+  justify-content: center;
+  gap: .5rem;
+  margin-top: .75rem;
+
+}
+
+.repo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  /* 统一灰色 */
+  border: 1px solid var(--onyx);
+  padding: 0;
+  cursor: pointer;
+  transition: background .35s, transform .35s, opacity .35s;
+  opacity: .55;
+}
+
+.repo-dot:hover:not(.active),
+.repo-dot:focus-visible:not(.active) {
+  background: var(--eerie-black-2);
+  outline: none;
+  opacity: .75;
+}
+
+.repo-dot.active {
+  background: rgb(10, 72, 68);
+  transform: scale(1.4);
+  opacity: 1;
+  border-color: #35c46a;
+}
+
+/* 拖动时可选择添加 class 禁用过渡（预留） */
+.repo-track.is-dragging {
+  transition: none !important;
+  cursor: grabbing;
+}
+
+@media (min-width: 700px) {
+  .repo-slide .content-card {
+    width: clamp(340px, 60%, 640px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .repo-track {
+    transition: none;
+  }
+
+  .repo-slide {
+    transition: none;
+  }
+
+  .repo-nav-btn {
+    transition: none;
+  }
+}
+
 
 /**
  * #testimonials-modal

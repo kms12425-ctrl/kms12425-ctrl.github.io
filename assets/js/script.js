@@ -17,8 +17,33 @@ sidebarBtn.addEventListener("click", function () { elementToggleFunc(sidebar); }
 
 
 // ================= GitHub Repositories (replacing testimonials) =================
-const repoList = document.getElementById('repo-list');
+const repoList = document.getElementById('repo-list'); // 现在是 track
+const repoCarousel = document.getElementById('repo-carousel');
+const repoPrevBtn = document.getElementById('repo-prev');
+const repoNextBtn = document.getElementById('repo-next');
+let repoSlides = [];
+let repoActiveIndex = 0;
+// 触摸滑动相关状态
+let repoIsDragging = false;
+let repoDragStartX = 0;
+let repoDragDeltaX = 0;
+let repoDragWasMoved = false;
+const REPO_SWIPE_THRESHOLD = 0.18; // 宽度 18% 触发翻页
+// 自动播放相关
+let repoAutoplayTimer = null;
+const REPO_AUTOPLAY_INTERVAL = 6500; // 6.5s
+let repoAutoplayPaused = false;
+let repoAutoplayUserPaused = false; // 用户交互导致暂停
 const repoLoading = document.getElementById('repo-loading');
+// 进度指示圆点容器（如果在 HTML 中未写死，我们运行时创建）
+let repoDotsContainer = document.getElementById('repo-dots');
+if (!repoDotsContainer && repoCarousel) {
+  repoDotsContainer = document.createElement('div');
+  repoDotsContainer.id = 'repo-dots';
+  repoDotsContainer.className = 'repo-dots';
+  repoCarousel.parentNode.insertBefore(repoDotsContainer, repoCarousel.nextSibling);
+}
+let repoDots = [];
 const modalContainer = document.querySelector('[data-modal-container]');
 const modalCloseBtn = document.querySelector('[data-modal-close-btn]');
 const overlay = document.querySelector('[data-overlay]');
@@ -44,71 +69,35 @@ function toggleRepoModal()
 modalCloseBtn && modalCloseBtn.addEventListener('click', toggleRepoModal);
 overlay && overlay.addEventListener('click', toggleRepoModal);
 
-async function fetchRepos()
+async function initRepos()
 {
   if (!repoList) return;
-
-  const workerEndpoint = 'https://github-proxy.kms12425-ctrl.workers.dev/api/repos';
-  const publicFallback = 'https://api.github.com/users/kms12425-ctrl/repos?per_page=12&sort=updated';
-
-  // 0) 先尝试读取 localStorage 的上次缓存，提升首屏（异步更新）
+  // 1) 优先缓存
+  const cached = window.RepoAPI && RepoAPI.getCachedRepos();
+  if (cached && cached.repos) {
+    renderRepos(cached.repos);
+    const lastEl = document.getElementById('repo-last-update');
+    if (lastEl && cached.generated_at) {
+      lastEl.textContent = 'Cached: ' + new Date(cached.generated_at).toLocaleString();
+    }
+  }
+  // 2) 异步刷新网络
   try {
-    const cached = localStorage.getItem('repos-cache-v1');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed && Array.isArray(parsed.repos)) {
-        renderRepos(parsed.repos);
-        const lastEl = document.getElementById('repo-last-update');
-        if (lastEl && parsed.generated_at) {
-          lastEl.textContent = 'Cached: ' + new Date(parsed.generated_at).toLocaleString();
-        }
+    const fresh = await RepoAPI.fetchRepos({ preferWorker: false, timeout: 5000 });
+    if (fresh && fresh.repos) {
+      renderRepos(fresh.repos);
+      const lastEl = document.getElementById('repo-last-update');
+      if (lastEl) {
+        lastEl.textContent = 'Updated: ' + new Date(fresh.generated_at).toLocaleString();
       }
     }
-  } catch (_) { }
-
-  // 包装 fetch 增加超时
-  const fetchWithTimeout = (url, ms = 4500) =>
-  {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), ms);
-    return fetch(url, { cache: 'no-store', signal: controller.signal })
-      .finally(() => clearTimeout(t));
-  };
-
-  // 1) 优先访问 Worker（带超时）
-  // try {
-  //   const resp = await fetchWithTimeout(workerEndpoint, 4500);
-  //   if (!resp.ok) throw new Error('Worker failed: ' + resp.status);
-  //   const payload = await resp.json();
-  //   if (payload && Array.isArray(payload.repos)) {
-  //     // 若之前已经渲染缓存列表，这里可以进行差异更新（简单直接重绘）
-  //     repoList.innerHTML = '';
-  //     renderRepos(payload.repos);
-  //     const lastEl = document.getElementById('repo-last-update');
-  //     if (lastEl && payload.generated_at) {
-  //       lastEl.textContent = 'Synced: ' + new Date(payload.generated_at).toLocaleString();
-  //     }
-  //     try { localStorage.setItem('repos-cache-v1', JSON.stringify(payload)); } catch (_) { }
-  //     return;
-  //   }
-  //   throw new Error('Unexpected worker JSON shape');
-  // } catch (e) {
-  //   console.warn('[Worker fallback]', e);
-  // }
-
-  // 2) 回退直接 GitHub 公共 API（非授权，速率较低）
-  try {
-    const resp = await fetchWithTimeout(publicFallback, 5000);
-    if (!resp.ok) throw new Error('GitHub API error ' + resp.status);
-    const data = await resp.json();
-    // 与 worker 返回字段不完全一致，这里直接渲染
-    repoList.innerHTML = '';
-    renderRepos(data);
-  } catch (e2) {
-    console.error('Fetch repos failed:', e2);
-    if (repoLoading) {
-      const titleEl = repoLoading.querySelector('.h4');
-      if (titleEl) titleEl.innerText = 'Failed to load repositories: ' + e2.message;
+  } catch (err) {
+    console.error('[RepoAPI] network error:', err);
+    if (!cached) {
+      if (repoLoading) {
+        const titleEl = repoLoading.querySelector('.h4');
+        if (titleEl) titleEl.innerText = 'Failed to load repositories: ' + err.message;
+      }
     }
   }
 }
@@ -116,27 +105,246 @@ async function fetchRepos()
 function renderRepos(repos)
 {
   if (repoLoading) repoLoading.remove();
+  repoList.innerHTML = '';
+  repoSlides = [];
+
   if (!repos || !repos.length) {
-    const li = document.createElement('li');
-    li.innerHTML = '<div class="content-card"><h4 class="h4 testimonials-item-title">No repositories found.</h4></div>';
-    repoList.appendChild(li);
+    const empty = document.createElement('li');
+    empty.className = 'repo-slide';
+    empty.innerHTML = '<div class="content-card"><h4 class="h4 testimonials-item-title">No repositories found.</h4></div>';
+    repoList.appendChild(empty);
+    repoSlides.push(empty);
+    updateRepoCarousel();
     return;
   }
-  repos.forEach(repo =>
+
+  repos.forEach((repo, idx) =>
   {
     const li = document.createElement('li');
-    li.className = 'testimonials-item';
+    li.className = 'repo-slide';
+    li.setAttribute('data-index', String(idx));
     li.innerHTML = `
-      <div class="content-card repo-card" data-repo>
-        <h4 class="h4 testimonials-item-title">${repo.name}</h4>
+      <div class="content-card repo-card" data-repo tabindex="0" aria-label="Repository ${escapeHTML(repo.name)}">
+        <h4 class="h4 testimonials-item-title">${escapeHTML(repo.name)}</h4>
         <div class="testimonials-text">
           <p>${repo.description ? escapeHTML(repo.description) : 'No description.'}</p>
-          <p style="margin-top:0.5rem; font-size:0.85rem; opacity:0.8;">⭐ ${repo.stargazers_count} • ${repo.language || 'No Lang'} • Updated ${new Date(repo.updated_at).toLocaleDateString()}</p>
+          <p style="margin-top:0.5rem; font-size:0.75rem; opacity:0.75; letter-spacing:.5px;">⭐ ${repo.stargazers_count} • ${escapeHTML(repo.language || 'No Lang')} • Updated ${new Date(repo.updated_at).toLocaleDateString()}</p>
         </div>
       </div>`;
     li.addEventListener('click', () => openRepoModal(repo));
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRepoModal(repo); } });
     repoList.appendChild(li);
+    repoSlides.push(li);
   });
+  repoActiveIndex = 0;
+  updateRepoCarousel();
+  bindRepoNav();
+  buildRepoDots();
+}
+
+function updateRepoCarousel()
+{
+  if (!repoSlides.length) return;
+  // 轨道移动
+  if (!repoIsDragging) {
+    const offset = repoActiveIndex * -100;
+    // 使用统一类控制速度，避免闪烁
+    if (!repoList.classList.contains('smooth-transition')) {
+      repoList.classList.add('smooth-transition');
+    }
+    repoList.style.transform = `translateX(${offset}%)`;
+  }
+
+  // 状态类
+  repoSlides.forEach((slide, i) =>
+  {
+    slide.classList.remove('is-active', 'is-prev', 'is-next');
+    if (i === repoActiveIndex) slide.classList.add('is-active');
+    else if (i === repoActiveIndex - 1) slide.classList.add('is-prev');
+    else if (i === repoActiveIndex + 1) slide.classList.add('is-next');
+  });
+
+  // 按钮状态
+  if (repoPrevBtn && repoNextBtn) {
+    const few = repoSlides.length < 2;
+    if (few) {
+      repoPrevBtn.style.visibility = 'hidden';
+      repoNextBtn.style.visibility = 'hidden';
+    } else {
+      repoPrevBtn.style.visibility = 'visible';
+      repoNextBtn.style.visibility = 'visible';
+      repoPrevBtn.disabled = repoActiveIndex <= 0;
+      repoNextBtn.disabled = repoActiveIndex >= repoSlides.length - 1;
+    }
+  }
+
+  // 左右渐隐提示 class 维护
+  if (repoCarousel) {
+    if (repoActiveIndex > 0) repoCarousel.classList.add('has-prev'); else repoCarousel.classList.remove('has-prev');
+    if (repoActiveIndex < repoSlides.length - 1) repoCarousel.classList.add('has-next'); else repoCarousel.classList.remove('has-next');
+  }
+
+  // 更新 dots
+  if (repoDots && repoDots.length) {
+    repoDots.forEach((d, i) =>
+    {
+      if (i === repoActiveIndex) d.classList.add('active'); else d.classList.remove('active');
+      d.setAttribute('aria-selected', i === repoActiveIndex ? 'true' : 'false');
+      d.tabIndex = i === repoActiveIndex ? 0 : -1;
+    });
+  }
+}
+
+function buildRepoDots()
+{
+  if (!repoDotsContainer) return;
+  repoDotsContainer.innerHTML = '';
+  repoDots = [];
+  if (repoSlides.length < 2) { repoDotsContainer.style.display = 'none'; return; } else { repoDotsContainer.style.display = 'flex'; }
+  repoDotsContainer.setAttribute('role', 'tablist');
+  repoSlides.forEach((_, i) =>
+  {
+    const b = document.createElement('button');
+    b.className = 'repo-dot';
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+    b.addEventListener('click', () =>
+    {
+      repoActiveIndex = i;
+      updateRepoCarousel();
+      pauseRepoAutoplay(true);
+    });
+    b.addEventListener('keydown', (e) =>
+    {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); repoActiveIndex = i; updateRepoCarousel(); pauseRepoAutoplay(true); }
+    });
+    repoDotsContainer.appendChild(b);
+    repoDots.push(b);
+  });
+  updateRepoCarousel();
+}
+
+function repoAutoplayStep()
+{
+  if (repoAutoplayPaused || repoAutoplayUserPaused) return;
+  if (repoActiveIndex < repoSlides.length - 1) {
+    repoActiveIndex++;
+    updateRepoCarousel();
+  } else {
+    // 循环回到开头
+    repoActiveIndex = 0;
+    updateRepoCarousel();
+  }
+}
+
+function startRepoAutoplay()
+{
+  clearRepoAutoplay();
+  repoAutoplayPaused = false;
+  repoAutoplayTimer = setInterval(repoAutoplayStep, REPO_AUTOPLAY_INTERVAL);
+}
+
+function clearRepoAutoplay()
+{
+  if (repoAutoplayTimer) {
+    clearInterval(repoAutoplayTimer);
+    repoAutoplayTimer = null;
+  }
+}
+
+function pauseRepoAutoplay(user = false)
+{
+  if (user) repoAutoplayUserPaused = true;
+  repoAutoplayPaused = true;
+  clearRepoAutoplay();
+}
+
+function resumeRepoAutoplay(delay = 6000)
+{
+  if (repoAutoplayUserPaused) return; // 用户主动暂停则不自动恢复
+  repoAutoplayPaused = false;
+  clearRepoAutoplay();
+  setTimeout(() => { if (!repoAutoplayPaused && !repoAutoplayUserPaused) startRepoAutoplay(); }, delay);
+}
+
+function bindRepoNav()
+{
+  if (!repoPrevBtn || !repoNextBtn) return;
+  if (!repoPrevBtn._bound) {
+    repoPrevBtn.addEventListener('click', () => { if (repoActiveIndex > 0) { repoActiveIndex--; updateRepoCarousel(); } pauseRepoAutoplay(); resumeRepoAutoplay(10000); });
+    repoPrevBtn._bound = true;
+  }
+  if (!repoNextBtn._bound) {
+    repoNextBtn.addEventListener('click', () => { if (repoActiveIndex < repoSlides.length - 1) { repoActiveIndex++; updateRepoCarousel(); } pauseRepoAutoplay(); resumeRepoAutoplay(10000); });
+    repoNextBtn._bound = true;
+  }
+  // 键盘方向键支持
+  if (!repoCarousel._keydownBound) {
+    repoCarousel.addEventListener('keydown', (e) =>
+    {
+      if (e.key === 'ArrowRight') { if (repoActiveIndex < repoSlides.length - 1) { repoActiveIndex++; updateRepoCarousel(); } }
+      else if (e.key === 'ArrowLeft') { if (repoActiveIndex > 0) { repoActiveIndex--; updateRepoCarousel(); } }
+      pauseRepoAutoplay();
+      resumeRepoAutoplay(10000);
+    });
+    repoCarousel._keydownBound = true;
+  }
+  // Resize 处理
+  if (!window._repoResizeBound) {
+    window.addEventListener('resize', () => { updateRepoCarousel(); });
+    window._repoResizeBound = true;
+  }
+
+  // 触摸/指针滑动绑定（仅绑定一次）
+  if (!repoCarousel._pointerBound) {
+    const onPointerDown = (e) =>
+    {
+      if (e.pointerType && e.pointerType !== 'touch' && e.pointerType !== 'pen') return; // 只处理触摸/笔
+      if (!repoSlides.length) return;
+      repoIsDragging = true;
+      repoDragWasMoved = false;
+      repoDragStartX = e.clientX;
+      repoDragDeltaX = 0;
+      repoList.style.transition = 'none';
+      pauseRepoAutoplay();
+      resumeRepoAutoplay(10000);
+    };
+    const onPointerMove = (e) =>
+    {
+      if (!repoIsDragging) return;
+      repoDragDeltaX = e.clientX - repoDragStartX;
+      if (Math.abs(repoDragDeltaX) > 3) repoDragWasMoved = true;
+      const percent = (repoDragDeltaX / repoCarousel.clientWidth) * 100;
+      const base = repoActiveIndex * -100;
+      repoList.style.transform = `translateX(${base + percent}%)`;
+    };
+    const onPointerUp = (e) =>
+    {
+      if (!repoIsDragging) return;
+      repoIsDragging = false;
+      repoList.style.transition = ''; // 使用 CSS 过渡
+      const width = repoCarousel.clientWidth || 1;
+      const ratio = repoDragDeltaX / width;
+      if (ratio > REPO_SWIPE_THRESHOLD && repoActiveIndex > 0) {
+        repoActiveIndex--;
+      } else if (ratio < -REPO_SWIPE_THRESHOLD && repoActiveIndex < repoSlides.length - 1) {
+        repoActiveIndex++;
+      }
+      repoDragDeltaX = 0;
+      updateRepoCarousel();
+    };
+    repoCarousel.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onPointerUp, { passive: true });
+    window.addEventListener('pointercancel', onPointerUp, { passive: true });
+    repoCarousel._pointerBound = true;
+  }
+
+  // 初始启动自动播放（如果有多于 1 张）
+  if (repoSlides.length > 1 && !repoAutoplayTimer && !repoAutoplayUserPaused) {
+    startRepoAutoplay();
+  }
 }
 
 function escapeHTML(str)
@@ -155,7 +363,8 @@ function openRepoModal(repo)
   toggleRepoModal();
 }
 
-fetchRepos();
+// 初始化仓库数据
+initRepos();
 
 
 // custom select variables

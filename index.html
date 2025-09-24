@@ -326,14 +326,24 @@
         -->
 
         <section class="testimonials" id="github-repos">
-          <h3 class="h3 testimonials-title">GitHub Repositories</h3>
-          <ul class="testimonials-list has-scrollbar" id="repo-list" aria-live="polite">
-            <li id="repo-loading" style="list-style:none; width:100%; text-align:center; opacity:0.7;">
-              <div class="content-card">
-                <h4 class="h4 testimonials-item-title">Loading repositories...</h4>
-              </div>
-            </li>
-          </ul>
+          <div class="repo-header-row">
+            <h3 class="h3 testimonials-title">GitHub Repositories</h3>
+            <div class="repo-nav-btns" aria-label="Repository navigation">
+              <button class="repo-nav-btn" id="repo-prev" aria-label="Previous repository" disabled>&lt;</button>
+              <button class="repo-nav-btn" id="repo-next" aria-label="Next repository" disabled>&gt;</button>
+            </div>
+          </div>
+          <div class="repo-carousel" id="repo-carousel" aria-live="polite">
+            <ul class="repo-track" id="repo-list">
+              <li id="repo-loading" class="repo-slide loading-slide"
+                style="list-style:none; text-align:center; opacity:0.7;">
+                <div class="content-card">
+                  <h4 class="h4 testimonials-item-title">Loading repositories...</h4>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <p id="repo-last-update" class="repo-last-update" aria-live="polite"></p>
         </section>
 
         <!--
@@ -1050,6 +1060,8 @@
 
 
 
+  <!-- repo api (must load before main script) -->
+  <script src="./assets/js/repo-api.js"></script>
   <!-- custom js link -->
   <script src="./assets/js/script.js"></script>
 
