@@ -51,6 +51,8 @@ const modalTitle = document.querySelector('[data-modal-title]');
 const modalText = document.querySelector('[data-modal-text]');
 const modalLink = document.querySelector('[data-modal-link]');
 const modalUpdated = document.querySelector('[data-modal-updated]');
+const modalDesc = document.querySelector('[data-modal-desc]');
+const modalStats = document.querySelector('[data-modal-stats]');
 
 function toggleRepoModal()
 {
@@ -356,8 +358,8 @@ function escapeHTML(str)
 function openRepoModal(repo)
 {
   modalTitle.textContent = repo.name;
-  modalText.innerHTML = `<p>${repo.description ? escapeHTML(repo.description) : 'No description.'}</p>
-    <p style="margin-top:0.75rem; font-size:0.85rem; opacity:0.85;">⭐ Stars: ${repo.stargazers_count} | Forks: ${repo.forks_count} | Issues: ${repo.open_issues_count}</p>`;
+  if (modalDesc) modalDesc.textContent = repo.description ? repo.description : 'No description.';
+  if (modalStats) modalStats.textContent = `⭐ Stars: ${repo.stargazers_count} | Forks: ${repo.forks_count} | Issues: ${repo.open_issues_count}`;
   modalLink.href = repo.html_url;
   modalUpdated.dateTime = repo.updated_at;
   modalUpdated.textContent = new Date(repo.updated_at).toLocaleString();
