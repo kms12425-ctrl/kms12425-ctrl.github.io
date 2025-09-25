@@ -88,7 +88,8 @@ async function initRepos()
       renderRepos(fresh.repos);
       const lastEl = document.getElementById('repo-last-update');
       if (lastEl) {
-        lastEl.textContent = 'Updated: ' + new Date(fresh.generated_at).toLocaleString();
+        lastEl.textContent = 'Last Update: ' + new Date(fresh.generated_at).toLocaleString();
+        lastEl.style.color = 'white';
       }
     }
   } catch (err) {
