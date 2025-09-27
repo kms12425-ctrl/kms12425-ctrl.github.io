@@ -1,0 +1,33 @@
+{
+  "name": "Static Web Project",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "features": {},
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.formatOnSave": true,
+        "files.eol": "\n",
+        "files.trimFinalNewlines": true,
+        "files.insertFinalNewline": true,
+        "css.validate": true,
+        "scss.validate": true,
+        "less.validate": true
+      },
+      "extensions": [
+        "ecmel.vscode-html-css",
+        "VisualStudioExptTeam.intellicode-api-usage-examples",
+        "VisualStudioExptTeam.vscodeintellicode",
+        "Zignd.html-css-class-completion",
+        "xabikos.JavaScriptSnippets",
+        "ms-vscode.vscode-typescript-next",
+        "ms-vscode.js-debug-nightly",
+        "mgmcdermott.vscode-language-babel",
+        "formulahendry.auto-rename-tag",
+        "ritwickdey.LiveServer"
+      ]
+    }
+  },
+  "forwardPorts": [5500],
+  "postCreateCommand": "npm install -g live-server",
+  "remoteUser": "node"
+}
